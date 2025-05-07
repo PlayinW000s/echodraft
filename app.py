@@ -1,0 +1,111 @@
+""import streamlit as st
+from openai import OpenAI
+import os
+import json
+
+# Initialize OpenAI client
+client = OpenAI(api_key=st.secrets["openai"]["api_key"])
+
+# Page config
+st.set_page_config(page_title="EchoDraft 2.5 – Text Only", layout="wide")
+
+# Session setup
+if "memory_vault" not in st.session_state:
+    st.session_state.memory_vault = []
+if "timeline_order" not in st.session_state:
+    st.session_state.timeline_order = []
+
+st.title("EchoDraft 2.5 – Text-Only Memoir Builder")
+
+# Step 1: Paste or Write Memory
+st.header("1. Paste or Write Your Memory")
+memory_text = st.text_area("Enter a memory you'd like to save:", height=200)
+
+if memory_text:
+    # Step 2: Persona Selection
+    st.header("2. Choose a Persona")
+    persona = st.selectbox("Who should reflect with you?", ["Therapist", "Editor", "Friend", "Skeptic"])
+    persona_prompts = {
+        "Therapist": "You are a therapist offering thoughtful, deep follow-up questions about the user's experience.",
+        "Editor": "You are a professional editor helping refine and organize a memoir.",
+        "Friend": "You are a warm friend, asking thoughtful, curious questions.",
+        "Skeptic": "You are a sharp interviewer, asking tough, clarifying questions."
+    }
+
+    # Step 3: Generate Follow-Up
+    st.header("3. AI Follow-Up")
+    if st.button("Ask Follow-Up Questions"):
+        messages = [
+            {"role": "system", "content": persona_prompts[persona]},
+            {"role": "user", "content": f"This is the user's memory:\n\n{memory_text}\n\nAsk 2–3 helpful follow-up questions."}
+        ]
+        reply = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages
+        )
+        follow_up = reply.choices[0].message.content
+        st.markdown(f"**{persona} asks:**")
+        st.write(follow_up)
+
+        user_reply = st.text_area("Your Response", placeholder="Write your reply to the AI here...")
+
+        # Step 4: Tagging and Response
+        if st.button("Analyze & Save"):
+            tag_prompt = f"""
+You are a personal storytelling assistant. Extract the following from the user's memory:
+- Key people
+- Places
+- Main emotion (1–2 words)
+- Themes (reuse recurring tags when possible, create new ones when appropriate)
+
+Memory:
+{memory_text}
+
+Format:
+{{
+"people": [...],
+"places": [...],
+"emotion": "...",
+"tags": [...]
+}}
+"""
+            tag_data = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": tag_prompt}],
+                temperature=0.5
+            )
+            structured = eval(tag_data.choices[0].message.content)
+
+            memory_id = len(st.session_state.memory_vault)
+            memory_entry = {
+                "id": memory_id,
+                "memory": memory_text,
+                "persona": persona,
+                "follow_up": follow_up,
+                "user_response": user_reply,
+                "tags": structured
+            }
+            st.session_state.memory_vault.append(memory_entry)
+            st.session_state.timeline_order.append(memory_id)
+            st.success("Saved to your Memory Vault!")
+
+# Step 5: Timeline Viewer
+st.header("4. Visual Timeline Builder")
+if st.session_state.memory_vault:
+    order = st.session_state.timeline_order
+    new_order = st.multiselect(
+        "Reorder scenes (drag or select in new sequence):",
+        options=order,
+        default=order,
+        format_func=lambda idx: f"{idx + 1}: {st.session_state.memory_vault[idx]['tags']['emotion']} – {st.session_state.memory_vault[idx]['memory'][:40]}..."
+    )
+    st.session_state.timeline_order = new_order
+
+    for i, idx in enumerate(new_order):
+        m = st.session_state.memory_vault[idx]
+        with st.expander(f"{i + 1}. {m['tags']['emotion']} – Tags: {', '.join(m['tags']['tags'])}"):
+            st.markdown(f"**Memory:** {m['memory']}")
+            st.markdown(f"**{m['persona']} asked:** {m['follow_up']}")
+            st.markdown(f"**Your Response:** {m['user_response']}")
+            st.markdown(f"**People:** {', '.join(m['tags']['people'])}")
+            st.markdown(f"**Places:** {', '.join(m['tags']['places'])}")
